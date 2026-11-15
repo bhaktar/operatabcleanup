@@ -1,0 +1,173 @@
+/* Gemeinsames Farbschema: dunkel im Opera-GX-Stil, helles Schema über prefers-color-scheme
+   bzw. Einstellung (data-theme auf <html>). */
+:root {
+  color-scheme: dark;
+  --bg: #0f0d14;
+  --bg-2: #16131d;
+  --surface: #1d1925;
+  --surface-2: #26212f;
+  --border: #322b3d;
+  --text: #ece8f2;
+  --muted: #a59db3;
+  --accent: #fa1e4e;
+  --accent-2: #ff3d7f;
+  --accent-text: #ffffff;
+  --accent-soft: rgba(250, 30, 78, 0.16);
+  --ok: #2bd49b;
+  --warn: #ffb547;
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  --radius: 10px;
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent-2);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f5f3f7;
+    --bg-2: #ece8f1;
+    --surface: #ffffff;
+    --surface-2: #f1edf5;
+    --border: #d9d2e1;
+    --text: #1d1724;
+    --muted: #5f566b;
+    --accent: #d8133f;
+    --accent-2: #e0245e;
+    --accent-soft: rgba(216, 19, 63, 0.10);
+    --ok: #0e8a62;
+    --warn: #a3620a;
+    --shadow: 0 4px 16px rgba(40, 20, 60, 0.12);
+  }
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f5f3f7;
+  --bg-2: #ece8f1;
+  --surface: #ffffff;
+  --surface-2: #f1edf5;
+  --border: #d9d2e1;
+  --text: #1d1724;
+  --muted: #5f566b;
+  --accent: #d8133f;
+  --accent-2: #e0245e;
+  --accent-soft: rgba(216, 19, 63, 0.10);
+  --ok: #0e8a62;
+  --warn: #a3620a;
+  --shadow: 0 4px 16px rgba(40, 20, 60, 0.12);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+a { color: var(--accent-2); }
+
+button, input, select, textarea { font: inherit; color: inherit; }
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s, border-color .12s;
+}
+.btn:hover { border-color: var(--accent-2); }
+.btn:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus);
+}
+.btn:disabled { opacity: .5; cursor: default; }
+.btn.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: transparent;
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger:hover { border-color: var(--accent); color: var(--accent-2); }
+.btn.small { padding: 4px 9px; font-size: 13px; }
+
+input[type="text"], input[type="search"], input[type="number"], select, textarea {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); }
+
+.ico {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex: none;
+}
+
+.muted { color: var(--muted); }
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 20px;
+  transform: translate(-50%, 30px);
+  opacity: 0;
+  pointer-events: none;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--ok);
+  padding: 10px 14px;
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: opacity .18s, transform .18s;
+  z-index: 1000;
+  max-width: min(560px, calc(100vw - 32px));
+}
+.toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.toast.error { border-left-color: var(--accent); }
+.toast button {
+  background: none;
+  border: 0;
+  color: var(--accent-2);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.progress {
+  height: 6px;
+  background: var(--surface-2);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.progress > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  transition: width .15s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tab-Ablage – Einstellungen</title>
+  <link rel="icon" href="icons/icon32.png">
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <header class="head">
+    <img src="icons/icon48.png" alt="" width="36" height="36">
+    <div>
+      <h1>Tab-Ablage – Einstellungen</h1>
+      <p class="muted">Änderungen werden sofort gespeichert. <a href="overview.html" id="link-overview">Zur Übersicht</a></p>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>Allgemein</h2>
+      <label class="check"><input type="checkbox" id="keepActiveTab"> Aktiven Tab beim „Alle Tabs ablegen“ offen lassen</label>
+      <label class="check"><input type="checkbox" id="openOverviewAfterSave"> Übersicht nach dem Ablegen mehrerer Tabs öffnen</label>
+      <label class="check"><input type="checkbox" id="fetchPreviews"> Vorschaubilder für verworfene/geschlossene Tabs nachträglich von der Seite laden</label>
+      <div class="row">
+        <label for="afterOpen">Nach dem Öffnen eines Eintrags</label>
+        <select id="afterOpen">
+          <option value="remove">aus der Liste entfernen</option>
+          <option value="archive">nach „Gesehen“ verschieben</option>
+          <option value="keep">in der Liste behalten</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="theme">Farbschema</label>
+        <select id="theme">
+          <option value="auto">Wie System</option>
+          <option value="dark">Dunkel (GX)</option>
+          <option value="light">Hell</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="pageSize">Einträge pro Seite in der Übersicht</label>
+        <select id="pageSize">
+          <option value="100">100</option>
+          <option value="200">200</option>
+          <option value="300">300</option>
+          <option value="500">500</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Automatik</h2>
+      <p class="muted">Wird alle 15 Minuten geprüft. Nie automatisch abgelegt werden: angeheftete Tabs, Tabs mit Ton, aktive Tabs und Domains auf der Ausnahmeliste.</p>
+      <label class="check"><input type="checkbox" id="autoEnabled"> Inaktive Tabs automatisch ablegen</label>
+      <div class="row indent">
+        <label for="autoHours">nach so vielen Stunden ohne Nutzung</label>
+        <input type="number" id="autoHours" min="0.25" max="720" step="0.25">
+      </div>
+      <label class="check"><input type="checkbox" id="limitEnabled"> Tab-Limit: bei mehr als X offenen Tabs die am längsten ungenutzten ablegen</label>
+      <div class="row indent">
+        <label for="limitMax">maximale Anzahl offener Tabs</label>
+        <input type="number" id="limitMax" min="1" max="5000" step="1">
+      </div>
+      <div class="row col">
+        <label for="whitelist">Ausnahmeliste – diese Domains nie automatisch ablegen (eine pro Zeile, Subdomains eingeschlossen)</label>
+        <textarea id="whitelist" rows="4" placeholder="mail.google.com&#10;web.whatsapp.com"></textarea>
+      </div>
+      <p id="autoLog" class="muted"></p>
+    </section>
+
+    <section class="card">
+      <h2>Kategorien-Regeln</h2>
+      <p class="muted">
+        Regeln werden von oben nach unten geprüft – die erste passende gewinnt. Domains passen auch auf Subdomains
+        (<code>amazon.de</code> → <code>smile.amazon.de</code>), mit Pfad nur auf diesen Pfad (<code>google.com/maps</code>).
+        Stichwörter werden in Titel und Kanal am Wortanfang gesucht (<code>aktie</code> findet „Aktien“), Stichwörter
+        mit höchstens 3 Zeichen nur als ganzes Wort. Eine Regel ohne Domains und Stichwörter ist eine Auffang-Regel
+        für ihren Bereich. Manuell gesetzte Kategorien werden nie überschrieben.
+      </p>
+      <div id="rules" class="rules"></div>
+      <div class="buttons">
+        <button id="rule-add" class="btn" type="button">Regel hinzufügen</button>
+        <button id="rules-save" class="btn primary" type="button">Regeln speichern &amp; neu kategorisieren</button>
+        <button id="rules-reset" class="btn danger" type="button">Standardregeln wiederherstellen</button>
+        <span id="rules-state" class="muted"></span>
+      </div>
+      <div class="tester">
+        <h3>Regel testen</h3>
+        <div class="row">
+          <input type="text" id="test-url" placeholder="URL, z. B. https://www.youtube.com/watch?v=dQw4w9WgXcQ">
+          <input type="text" id="test-title" placeholder="Titel / Kanal">
+          <strong id="test-result" class="result"></strong>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Daten</h2>
+      <p class="muted" id="data-stats"></p>
+      <div class="buttons">
+        <button id="export-json" class="btn" type="button">Als JSON exportieren</button>
+        <button id="export-html" class="btn" type="button">Als Lesezeichen (HTML) exportieren</button>
+        <button id="import" class="btn" type="button">Importieren (JSON, Lesezeichen-HTML, URL-Liste) …</button>
+        <input id="import-file" type="file" accept=".json,.html,.htm,.txt,application/json,text/html,text/plain" hidden>
+        <button id="clear" class="btn danger" type="button">Alle abgelegten Einträge löschen</button>
+      </div>
+      <p class="muted small">
+        Der JSON-Export eignet sich für Claude Cowork: Cowork kann die Datei lesen, das Feld <code>category</code>
+        setzen, und du importierst sie hier wieder. Einträge werden über <code>id</code> bzw. die URL zusammengeführt;
+        geänderte Kategorien gelten als manuell gesetzt. Details im README.
+      </p>
+    </section>
+  </main>
+
+  <template id="rule-tpl">
+    <div class="rule">
+      <div class="rule-head">
+        <span class="prio"></span>
+        <input type="text" class="r-name" placeholder="Kategoriename" maxlength="60" aria-label="Kategoriename">
+        <select class="r-scope" aria-label="Gilt für">
+          <option value="youtube">nur YouTube</option>
+          <option value="web">nur Web</option>
+          <option value="alle">alle</option>
+        </select>
+        <label class="check inline"><input type="checkbox" class="r-enabled"> aktiv</label>
+        <span class="spacer"></span>
+        <button class="btn small r-up" type="button" title="Nach oben (höhere Priorität)">↑</button>
+        <button class="btn small r-down" type="button" title="Nach unten">↓</button>
+        <button class="btn small danger r-del" type="button" title="Regel löschen">Löschen</button>
+      </div>
+      <div class="rule-body">
+        <label>Domains<textarea class="r-domains" rows="2" placeholder="z. B. amazon.de, ebay.de"></textarea></label>
+        <label>Stichwörter<textarea class="r-keywords" rows="2" placeholder="z. B. tutorial, anleitung"></textarea></label>
+      </div>
+    </div>
+  </template>
+
+  <script type="module" src="options.js"></script>
+</body>
+</html>

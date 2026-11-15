@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>Tab-Ablage</title>
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="head">
+    <img src="icons/icon32.png" alt="" width="24" height="24">
+    <h1>Tab-Ablage</h1>
+    <button id="btn-options" class="btn small" type="button" title="Einstellungen">Einstellungen</button>
+  </header>
+
+  <section class="stats" aria-live="polite">
+    <div class="stat"><strong id="stat-open">–</strong><span>offene Tabs</span><small id="stat-saveable" class="muted"></small></div>
+    <div class="stat"><strong id="stat-saved">–</strong><span>abgelegt</span><small id="stat-youtube" class="muted"></small></div>
+  </section>
+
+  <section class="actions">
+    <button id="btn-all" class="btn primary big" type="button">Alle Tabs ablegen &amp; schließen</button>
+    <button id="btn-window" class="btn" type="button">Nur dieses Fenster ablegen</button>
+    <button id="btn-youtube" class="btn" type="button">Nur YouTube-Tabs ablegen</button>
+    <button id="btn-tab" class="btn" type="button">Diesen Tab ablegen</button>
+    <button id="btn-overview" class="btn" type="button">Übersicht öffnen</button>
+  </section>
+
+  <section id="job" class="job" hidden>
+    <div class="progress"><span id="job-bar"></span></div>
+    <p id="job-text" class="muted"></p>
+  </section>
+
+  <p id="hint" class="hint muted"></p>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

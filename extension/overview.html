@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tab-Ablage – Übersicht</title>
+  <link rel="icon" href="icons/icon32.png">
+  <link rel="stylesheet" href="theme.css">
+  <link rel="stylesheet" href="overview.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="icons/icon32.png" alt="" width="26" height="26">
+      <h1>Tab-Ablage</h1>
+      <span id="total" class="muted"></span>
+    </div>
+    <input id="search" type="search" placeholder="Suchen in Titel, Kanal, Domain …" aria-label="Suchen" autocomplete="off">
+    <div class="tools">
+      <label class="field">Sortierung
+        <select id="sort">
+          <option value="newest">Neueste zuerst</option>
+          <option value="oldest">Älteste zuerst</option>
+          <option value="title">Titel A–Z</option>
+        </select>
+      </label>
+      <label class="field">Gruppieren
+        <select id="group">
+          <option value="category">Kategorie</option>
+          <option value="channel">Kanal</option>
+          <option value="domain">Domain</option>
+          <option value="date">Datum</option>
+          <option value="none">Keine</option>
+        </select>
+      </label>
+      <button id="btn-recat" class="btn" type="button" title="Regeln erneut auf alle nicht manuell zugeordneten Einträge anwenden">Neu kategorisieren</button>
+      <details class="menu">
+        <summary class="btn">Daten</summary>
+        <div class="menu-pop">
+          <button id="btn-export-json" class="btn" type="button">Als JSON exportieren</button>
+          <button id="btn-export-html" class="btn" type="button">Als Lesezeichen (HTML) exportieren</button>
+          <button id="btn-import" class="btn" type="button">Importieren …</button>
+          <button id="btn-retry" class="btn" type="button">Fehlende Vorschauen nachladen</button>
+          <input id="file-import" type="file" accept=".json,.html,.htm,.txt,application/json,text/html,text/plain" hidden>
+        </div>
+      </details>
+      <button id="btn-options" class="btn" type="button">Einstellungen</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" aria-label="Filter">
+      <nav class="views">
+        <button class="side-item" data-view="active" type="button"><span>Abgelegt</span><b id="count-active">0</b></button>
+        <button class="side-item" data-view="archived" type="button"><span>Gesehen</span><b id="count-archived">0</b></button>
+      </nav>
+
+      <h2>Typ</h2>
+      <div class="seg" role="radiogroup" aria-label="Typ">
+        <button type="button" data-type="all" role="radio">Alle</button>
+        <button type="button" data-type="youtube" role="radio">YouTube</button>
+        <button type="button" data-type="web" role="radio">Web</button>
+      </div>
+
+      <h2>Kategorien</h2>
+      <div id="cats" class="cats"></div>
+
+      <h2>Nach dem Öffnen</h2>
+      <select id="after-open" aria-label="Nach dem Öffnen">
+        <option value="remove">aus der Liste entfernen</option>
+        <option value="archive">nach „Gesehen“ verschieben</option>
+        <option value="keep">in der Liste behalten</option>
+      </select>
+      <p class="tip muted">Klick öffnet im Vordergrund, Mittelklick oder Strg+Klick im Hintergrund.</p>
+    </aside>
+
+    <main class="main">
+      <section id="job" class="job" hidden>
+        <div class="progress"><span id="job-bar"></span></div>
+        <span id="job-text" class="muted"></span>
+      </section>
+
+      <section id="bulk" class="bulk" hidden>
+        <strong id="bulk-count"></strong>
+        <button id="bulk-open" class="btn small" type="button">Öffnen</button>
+        <button id="bulk-archive" class="btn small" type="button">Als gesehen</button>
+        <button id="bulk-category" class="btn small" type="button">Kategorie …</button>
+        <button id="bulk-delete" class="btn small danger" type="button">Löschen</button>
+        <span class="spacer"></span>
+        <button id="bulk-page" class="btn small" type="button">Ganze Seite</button>
+        <button id="bulk-all" class="btn small" type="button">Alle Treffer</button>
+        <button id="bulk-none" class="btn small" type="button">Auswahl aufheben</button>
+      </section>
+
+      <div id="pager-top" class="pager"></div>
+      <div id="grid" class="grid" aria-live="polite"></div>
+      <div id="empty" class="empty" hidden>
+        <p id="empty-text"></p>
+      </div>
+      <div id="pager-bottom" class="pager"></div>
+    </main>
+  </div>
+
+  <div id="catmenu" class="catmenu" hidden role="dialog" aria-label="Kategorie ändern">
+    <div class="catmenu-head">Kategorie ändern</div>
+    <div id="catmenu-list" class="catmenu-list"></div>
+    <form id="catmenu-form" class="catmenu-new">
+      <input id="catmenu-input" type="text" placeholder="Neue Kategorie …" maxlength="60" aria-label="Neue Kategorie">
+      <button class="btn small" type="submit">OK</button>
+    </form>
+    <button id="catmenu-auto" class="btn small" type="button">Automatisch (Regeln)</button>
+  </div>
+
+  <script type="module" src="overview.js"></script>
+</body>
+</html>
