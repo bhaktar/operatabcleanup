@@ -33,6 +33,23 @@ export function isSaveableUrl(url) {
   return /^https?:\/\//i.test(String(url || '')) && !!safeUrl(url);
 }
 
+/**
+ * Zwischenseiten (Cookie-Zustimmung, Captcha) leiten mit ?continue=<Ziel> weiter.
+ * Ein Tab, der dort hängt, soll als das eigentliche Ziel abgelegt werden.
+ */
+export function unwrapUrl(url) {
+  const u = safeUrl(url);
+  if (!u) return String(url || '').trim();
+  const host = u.hostname.toLowerCase();
+  const wrapper = host === 'consent.youtube.com' || host === 'consent.google.com' ||
+    (/(^|\.)google\.[a-z.]+$/.test(host) && u.pathname.startsWith('/sorry'));
+  if (wrapper) {
+    const target = u.searchParams.get('continue');
+    if (target && /^https?:\/\//i.test(target) && safeUrl(target)) return target;
+  }
+  return u.toString();
+}
+
 /** Hostname ohne führendes "www.". */
 export function getDomain(url) {
   const u = safeUrl(url);

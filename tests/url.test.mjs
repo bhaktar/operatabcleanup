@@ -116,3 +116,12 @@ test('domainInList (Ausnahmeliste) mit Subdomains', () => {
   assert.equal(domainInList('notgoogle.com', ['google.com']), false);
   assert.equal(domainInList('', ['google.com']), false);
 });
+
+test('unwrapUrl: Zustimmungs-/Captcha-Seiten liefern das eigentliche Ziel', async () => {
+  const { unwrapUrl } = await import('../extension/lib/url.js');
+  const target = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s';
+  assert.equal(unwrapUrl(`https://consent.youtube.com/m?continue=${encodeURIComponent(target)}&gl=DE`), target);
+  assert.equal(unwrapUrl(`https://www.google.com/sorry/index?continue=${encodeURIComponent(target)}&q=x`), target);
+  assert.equal(unwrapUrl('https://www.google.com/search?continue=https://evil.example'), 'https://www.google.com/search?continue=https://evil.example');
+  assert.equal(unwrapUrl('https://consent.youtube.com/m?continue=javascript:alert(1)'), 'https://consent.youtube.com/m?continue=javascript:alert(1)');
+});

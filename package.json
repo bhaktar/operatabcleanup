@@ -7,6 +7,6 @@
   "scripts": {
     "test": "node --test",
     "icons": "python3 tools/make_icons.py",
-    "smoke": "node tools/smoke-test.cjs"
+    "smoke": "node tools/smoke.cjs"
   }
 }

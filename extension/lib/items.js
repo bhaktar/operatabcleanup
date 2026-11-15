@@ -1,7 +1,7 @@
 // Datenmodell der abgelegten Einträge, Import/Export (rein, ohne chrome.*).
 
 import {
-  isSaveableUrl, parseYouTube, itemKey, buildYouTubeUrl, cleanUrl, cleanTitle, getDomain,
+  isSaveableUrl, parseYouTube, unwrapUrl, itemKey, buildYouTubeUrl, cleanUrl, cleanTitle, getDomain,
   hashId, youtubeThumb, sanitizeImageUrl, parseTimestamp,
 } from './url.js';
 import { categorize, ruleCategoryNames } from './categorize.js';
@@ -15,7 +15,7 @@ export const STATUSES = ['active', 'archived'];
  * nicht abgelegt werden kann (z. B. chrome://, opera://, about:).
  */
 export function buildItem(input, now = Date.now()) {
-  const raw = String((input && input.url) || '').trim();
+  const raw = unwrapUrl(String((input && input.url) || '').trim());
   if (!isSaveableUrl(raw)) return null;
   const yt = parseYouTube(raw);
   const key = itemKey(raw);
