@@ -246,6 +246,19 @@ body { min-height: 100vh; }
   cursor: pointer;
 }
 .badge:hover { border-color: var(--accent-2); }
+.badge[style*="--c"] {
+  background: color-mix(in srgb, var(--c) 24%, transparent);
+  border-color: color-mix(in srgb, var(--c) 65%, transparent);
+}
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  border-radius: 50%;
+  vertical-align: 0;
+  background: var(--c, var(--border));
+}
 .badge.manual::after { content: " ✎"; color: var(--muted); }
 .acts { margin-left: auto; display: flex; gap: 2px; }
 .icon-btn {
@@ -293,3 +306,15 @@ body { min-height: 100vh; }
   .sel { opacity: 1; }
   .main { padding: 12px; }
 }
+
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0 0 0 6px;
+  color: var(--accent-2);
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+.link-btn:hover { text-decoration: underline; }

@@ -1,11 +1,14 @@
-import { send, applyTheme, toast, exportJson, exportBookmarks, importFile, formatDateTime } from './lib/ui.js';
-import { getSettings, saveSettings, getRules, saveRules } from './lib/settings.js';
-import { DEFAULT_RULES, normalizeRules, parseList, categorize } from './lib/categorize.js';
+import { applyTheme, toast, exportJson, exportBookmarks, importFile, formatDateTime } from './lib/ui.js';
+import { send, escapeHtml as esc } from './lib/ui.js';
+import { getSettings, saveSettings, getRules } from './lib/settings.js';
+import { normalizeRules, parseList, categorize } from './lib/categorize.js';
+import { uniqueName, newCategory, moveCategory } from './lib/categories.js';
+import { SUGGESTIONS, activateSuggestion, isSuggestionActive } from './lib/suggestions.js';
 import { buildItem } from './lib/items.js';
 
 const $ = (id) => document.getElementById(id);
 let rules = [];
-let rulesDirty = false;
+let counts = new Map();
 
 function showError(e) {
   toast(`Fehler: ${e && e.message ? e.message : e}`, { error: true, ms: 8000 });
@@ -19,6 +22,7 @@ async function loadSettings() {
   $('keepActiveTab').checked = s.keepActiveTab;
   $('openOverviewAfterSave').checked = s.openOverviewAfterSave;
   $('fetchPreviews').checked = s.fetchPreviews;
+  $('closeAfterFile').checked = s.closeAfterFile;
   $('afterOpen').value = s.afterOpen;
   $('theme').value = s.theme;
   $('pageSize').value = String(s.pageSize);
@@ -49,6 +53,7 @@ async function saveGeneral() {
       keepActiveTab: $('keepActiveTab').checked,
       openOverviewAfterSave: $('openOverviewAfterSave').checked,
       fetchPreviews: $('fetchPreviews').checked,
+      closeAfterFile: $('closeAfterFile').checked,
       afterOpen: $('afterOpen').value,
       theme: $('theme').value,
       pageSize: Number($('pageSize').value) || 200,
@@ -63,7 +68,7 @@ async function saveGeneral() {
   } catch (e) { showError(e); }
 }
 
-for (const id of ['keepActiveTab', 'openOverviewAfterSave', 'fetchPreviews', 'afterOpen', 'theme', 'pageSize',
+for (const id of ['keepActiveTab', 'openOverviewAfterSave', 'fetchPreviews', 'closeAfterFile', 'afterOpen', 'theme', 'pageSize',
   'autoEnabled', 'limitEnabled']) {
   $(id).addEventListener('change', scheduleSave);
 }
@@ -75,98 +80,233 @@ async function showAutoLog() {
     ? `Zuletzt automatisch abgelegt: ${autoLog.count} Tabs am ${formatDateTime(autoLog.at)}.` : '';
 }
 
-// ------------------------------------------------------------------ Regeln
+// ------------------------------------------------------------------ Kategorien
+// Alle Änderungen laufen über den Hintergrunddienst (er schreibt `rules` und passt `items` an).
+// Das Kontextmenü und die Übersicht reagieren auf die Speicheränderung sofort.
 
-function renderRules() {
-  const box = $('rules');
-  const tpl = $('rule-tpl');
-  box.replaceChildren();
+let opChain = Promise.resolve();
+/** Führt Änderungen nacheinander aus (z. B. Stichwort-Speichern vor dem Umbenennen). */
+function op(fn) {
+  const run = opChain.then(fn);
+  opChain = run.catch(() => {});
+  return run.catch(showError);
+}
+
+let saveTimer2 = null;
+function setState(text) { $('cats-state').textContent = text; }
+
+/** Regeln (debounced) speichern; der Hintergrunddienst ordnet danach neu zu. */
+function queueRulesSave(delay = 600) {
+  setState('Wird gespeichert …');
+  clearTimeout(saveTimer2);
+  saveTimer2 = setTimeout(() => { saveTimer2 = null; op(saveRulesNow); }, delay);
+}
+
+async function saveRulesNow() {
+  const r = await send('saveRules', { rules });
+  setState(r.changed ? `Gespeichert – ${r.changed} Einträge neu zugeordnet.` : 'Gespeichert.');
+}
+
+/** Ausstehendes Speichern sofort ausführen (vor Umbenennen/Löschen). */
+async function flushRulesSave() {
+  if (saveTimer2) { clearTimeout(saveTimer2); saveTimer2 = null; await saveRulesNow(); }
+}
+
+function autoSummary(r) {
+  const parts = [];
+  if (r.fallback) parts.push('Auffang-Kategorie');
+  if (r.domains.length) parts.push(`${r.domains.length} Domain${r.domains.length === 1 ? '' : 's'}`);
+  if (r.keywords.length) parts.push(r.keywords.length === 1 ? '1 Stichwort' : `${r.keywords.length} Stichwörter`);
+  if (!parts.length) return '(keine – nur manuelle Zuordnung)';
+  return `(${parts.join(', ')}${r.enabled ? '' : ', pausiert'})`;
+}
+
+function renderCats() {
+  const list = $('cat-list');
+  const open = new Set([...list.querySelectorAll('.cat')].filter((el) => el.querySelector('.c-rules').open).map((el) => el.dataset.id));
+  const tpl = $('cat-tpl');
+  list.replaceChildren();
   rules.forEach((r, i) => {
     const el = tpl.content.firstElementChild.cloneNode(true);
-    el.dataset.index = i;
-    el.classList.toggle('disabled', !r.enabled);
+    el.dataset.id = r.id;
+    el.style.setProperty('--c', r.color || 'var(--border)');
     el.querySelector('.prio').textContent = `${i + 1}.`;
-    el.querySelector('.r-name').value = r.name;
-    el.querySelector('.r-scope').value = r.scope;
-    el.querySelector('.r-enabled').checked = r.enabled;
-    el.querySelector('.r-domains').value = r.domains.join(', ');
-    el.querySelector('.r-keywords').value = r.keywords.join(', ');
-    el.querySelector('.r-up').disabled = i === 0;
-    el.querySelector('.r-down').disabled = i === rules.length - 1;
-    box.appendChild(el);
+    el.querySelector('.c-color').value = r.color || '#888888';
+    el.querySelector('.c-name').value = r.name;
+    const n = counts.get(r.name) || 0;
+    el.querySelector('.c-count').textContent = `${n} Eintr${n === 1 ? 'ag' : 'äge'}`;
+    el.querySelector('.c-auto').textContent = autoSummary(r);
+    el.querySelector('.c-scope').value = r.scope;
+    el.querySelector('.c-enabled').checked = r.enabled;
+    el.querySelector('.c-fallback').checked = r.fallback;
+    el.querySelector('.c-domains').value = r.domains.join(', ');
+    el.querySelector('.c-keywords').value = r.keywords.join(', ');
+    el.querySelector('.c-up').disabled = i === 0;
+    el.querySelector('.c-down').disabled = i === rules.length - 1;
+    if (open.has(r.id)) el.querySelector('.c-rules').open = true;
+    list.appendChild(el);
   });
+  renderSuggestions();
   updateTest();
 }
 
-/** Formularinhalt -> rules-Array (ohne zu speichern). */
-function readRules() {
-  rules = [...$('rules').querySelectorAll('.rule')].map((el, i) => ({
-    id: rules[i] ? rules[i].id : `r${Date.now().toString(36)}${i}`,
-    name: el.querySelector('.r-name').value.trim(),
-    scope: el.querySelector('.r-scope').value,
-    enabled: el.querySelector('.r-enabled').checked,
-    domains: parseList(el.querySelector('.r-domains').value),
-    keywords: parseList(el.querySelector('.r-keywords').value),
-  }));
-  return rules;
+function renderSuggestions() {
+  $('sug-list').innerHTML = SUGGESTIONS.map((sg) => {
+    const active = isSuggestionActive(rules, sg);
+    return `<div class="sug${active ? ' active' : ''}" data-sug="${esc(sg.id)}">` +
+      `<strong><i class="dot" style="--c:${esc(sg.color)}"></i>${esc(sg.name)}</strong>` +
+      (sg.hint ? `<span class="muted small">${esc(sg.hint)}</span>` : '') +
+      `<span class="kw muted">${esc(sg.keywords.join(', '))}</span>` +
+      `<div class="buttons">` +
+      (active
+        ? `<button class="btn small" type="button" disabled>Aktiv</button><button class="btn small danger" type="button" data-sug-off>Deaktivieren …</button>`
+        : `<button class="btn small primary" type="button" data-sug-on>Aktivieren</button><button class="btn small" type="button" data-sug-bare title="Nur die Kategorie anlegen, ohne Stichwörter">Nur Kategorie</button>`) +
+      `</div></div>`;
+  }).join('');
 }
 
-function markDirty() {
-  rulesDirty = true;
-  $('rules-state').textContent = 'Nicht gespeicherte Änderungen';
+function ruleOf(el) {
+  const id = el.closest('.cat')?.dataset.id;
+  return rules.find((r) => r.id === id) || null;
 }
 
-$('rules').addEventListener('input', () => { markDirty(); readRules(); updateTest(); });
-$('rules').addEventListener('change', (e) => {
-  if (e.target.classList.contains('r-enabled')) e.target.closest('.rule').classList.toggle('disabled', !e.target.checked);
-});
-$('rules').addEventListener('click', (e) => {
-  const el = e.target.closest('.rule');
-  if (!el) return;
-  readRules();
-  const i = Number(el.dataset.index);
-  if (e.target.closest('.r-up') && i > 0) [rules[i - 1], rules[i]] = [rules[i], rules[i - 1]];
-  else if (e.target.closest('.r-down') && i < rules.length - 1) [rules[i + 1], rules[i]] = [rules[i], rules[i + 1]];
-  else if (e.target.closest('.r-del')) {
-    if (!confirm(`Regel „${rules[i].name || 'ohne Namen'}“ löschen?`)) return;
-    rules.splice(i, 1);
-  } else return;
-  markDirty();
-  renderRules();
+const catList = $('cat-list');
+
+catList.addEventListener('input', (e) => {
+  const r = ruleOf(e.target);
+  if (!r) return;
+  const t = e.target;
+  if (t.classList.contains('c-name')) return; // Umbenennen erst beim Verlassen des Feldes
+  if (t.classList.contains('c-color')) {
+    r.color = t.value;
+    t.closest('.cat').style.setProperty('--c', t.value);
+  } else if (t.classList.contains('c-domains')) r.domains = parseList(t.value);
+  else if (t.classList.contains('c-keywords')) r.keywords = parseList(t.value);
+  else return;
+  t.closest('.cat').querySelector('.c-auto').textContent = autoSummary(r);
+  updateTest();
+  queueRulesSave();
 });
 
-$('rule-add').addEventListener('click', () => {
-  readRules();
-  rules.unshift({ id: `r${Date.now().toString(36)}`, name: 'Neue Kategorie', scope: 'alle', enabled: true, domains: [], keywords: [] });
-  markDirty();
-  renderRules();
-  $('rules').querySelector('.r-name').select();
+catList.addEventListener('change', (e) => {
+  const r = ruleOf(e.target);
+  if (!r) return;
+  const t = e.target;
+  if (t.classList.contains('c-name')) {
+    const name = t.value.trim();
+    if (name === r.name) return;
+    op(async () => {
+      await flushRulesSave();
+      try {
+        const res = await send('renameCategory', { id: r.id, name });
+        r.name = res.newName;
+        t.value = res.newName;
+        toast(`Umbenannt in „${res.newName}“${res.renamed ? ` – ${res.renamed} Einträge angepasst` : ''}.`);
+      } catch (err) {
+        t.value = r.name;
+        throw err;
+      }
+    });
+    return;
+  }
+  if (t.classList.contains('c-scope')) r.scope = t.value;
+  else if (t.classList.contains('c-enabled')) r.enabled = t.checked;
+  else if (t.classList.contains('c-fallback')) r.fallback = t.checked;
+  else if (t.classList.contains('c-color')) { queueRulesSave(0); return; }
+  else return;
+  t.closest('.cat').querySelector('.c-auto').textContent = autoSummary(r);
+  updateTest();
+  queueRulesSave(0);
 });
 
-$('rules-save').addEventListener('click', async () => {
-  readRules();
-  const empty = rules.filter((r) => !r.name);
-  if (empty.length) { toast('Jede Regel braucht einen Kategorienamen.', { error: true }); return; }
-  try {
-    rules = await saveRules(rules);
-    rulesDirty = false;
-    renderRules();
-    const r = await send('recategorize');
-    $('rules-state').textContent = '';
-    toast(`Regeln gespeichert. ${r.changed} Einträge neu zugeordnet.`);
-  } catch (e) { showError(e); }
+catList.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.classList.contains('c-name')) e.target.blur();
 });
 
-$('rules-reset').addEventListener('click', async () => {
-  if (!confirm('Alle Regeln durch die Standardregeln ersetzen?')) return;
-  rules = normalizeRules(DEFAULT_RULES);
-  markDirty();
-  renderRules();
-  toast('Standardregeln geladen – zum Übernehmen „Regeln speichern“ klicken.');
+catList.addEventListener('click', (e) => {
+  const r = ruleOf(e.target);
+  if (!r) return;
+  if (e.target.closest('.c-up') || e.target.closest('.c-down')) {
+    rules = moveCategory(rules, r.id, e.target.closest('.c-up') ? -1 : 1);
+    renderCats();
+    queueRulesSave(0);
+  } else if (e.target.closest('.c-del')) {
+    askDelete(r);
+  }
 });
 
-window.addEventListener('beforeunload', (e) => {
-  if (rulesDirty) { e.preventDefault(); e.returnValue = ''; }
+/** Löschen mit Rückfrage und Wahl der Zielkategorie für vorhandene Einträge. */
+function askDelete(r) {
+  const n = counts.get(r.name) || 0;
+  $('del-title').textContent = `Kategorie „${r.name}“ löschen?`;
+  $('del-text').textContent = n
+    ? `${n} Eintr${n === 1 ? 'ag ist' : 'äge sind'} in dieser Kategorie. Wohin sollen sie?`
+    : 'Diese Kategorie enthält keine Einträge.';
+  const others = rules.filter((x) => x.id !== r.id).map((x) => x.name);
+  const def = others.includes('Sonstiges') ? 'Sonstiges' : '';
+  $('del-target').innerHTML =
+    `<option value="__auto">Automatisch neu zuordnen (Regeln)</option>` +
+    (others.includes('Sonstiges') ? '' : '<option value="Sonstiges">Sonstiges</option>') +
+    others.map((x) => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+  $('del-target').value = def || 'Sonstiges';
+  $('del-target').closest('label').hidden = n === 0;
+  const dlg = $('del-dialog');
+  dlg.returnValue = '';
+  dlg.onclose = () => {
+    if (dlg.returnValue !== 'ok') return;
+    const v = $('del-target').value;
+    op(async () => {
+      await flushRulesSave();
+      const res = await send('deleteCategory', { id: r.id, target: v === '__auto' ? null : v });
+      toast(`„${res.name}“ gelöscht${res.moved ? ` – ${res.moved} Einträge verschoben` : ''}.`);
+    });
+  };
+  dlg.showModal();
+}
+
+$('cat-add').addEventListener('click', () => {
+  const c = newCategory(rules, uniqueName(rules));
+  rules = [c, ...rules];
+  renderCats();
+  const input = catList.querySelector(`.cat[data-id="${CSS.escape(c.id)}"] .c-name`);
+  input.focus();
+  input.select();
+  op(async () => { clearTimeout(saveTimer2); saveTimer2 = null; await saveRulesNow(); });
+});
+
+$('sug-list').addEventListener('click', (e) => {
+  const box = e.target.closest('[data-sug]');
+  if (!box) return;
+  const sg = SUGGESTIONS.find((x) => x.id === box.dataset.sug);
+  if (e.target.closest('[data-sug-on]') || e.target.closest('[data-sug-bare]')) {
+    const withKeywords = !!e.target.closest('[data-sug-on]');
+    op(async () => {
+      await flushRulesSave();
+      rules = normalizeRules(activateSuggestion(rules, sg.id, { withKeywords }));
+      renderCats();
+      await saveRulesNow();
+      toast(`„${sg.name}“ aktiviert${withKeywords ? '' : ' (ohne Stichwörter)'}.`);
+    });
+  } else if (e.target.closest('[data-sug-off]')) {
+    const r = rules.find((x) => x.id === sg.id) || rules.find((x) => x.name.toLowerCase() === sg.name.toLowerCase());
+    if (r) askDelete(r);
+  }
+});
+
+$('cats-recat').addEventListener('click', () => op(async () => {
+  await flushRulesSave();
+  const r = await send('recategorize');
+  toast(`Neu kategorisiert: ${r.changed} Einträge geändert (manuelle Zuordnungen bleiben).`);
+}));
+
+$('cats-reset').addEventListener('click', () => {
+  if (!confirm('Alle Kategorien durch die Standardkategorien ersetzen? Eigene Kategorien und Stichwörter gehen verloren; '
+    + 'Einträge behalten ihre Kategorie.')) return;
+  op(async () => {
+    clearTimeout(saveTimer2); saveTimer2 = null;
+    const r = await send('resetRules');
+    toast(`Standardkategorien wiederhergestellt. ${r.changed} Einträge neu zugeordnet.`);
+  });
 });
 
 function updateTest() {
@@ -175,11 +315,32 @@ function updateTest() {
   if (!url && !title) { $('test-result').textContent = ''; return; }
   const item = buildItem({ url: url || 'https://example.com/', title }) ||
     buildItem({ url: 'https://example.com/', title });
-  item.channel = '';
   $('test-result').textContent = `→ ${categorize(item, normalizeRules(rules))}`;
 }
 $('test-url').addEventListener('input', updateTest);
 $('test-title').addEventListener('input', updateTest);
+
+/** Regeln von außen geändert (Übersicht, Import, Hintergrund) -> übernehmen, ohne Eingaben zu stören. */
+async function onRulesChanged() {
+  if (saveTimer2) return; // eigene Änderung steht noch aus
+  const fresh = await getRules();
+  const editing = catList.contains(document.activeElement);
+  const sameShape = fresh.length === rules.length && fresh.every((r, i) => r.id === rules[i].id && r.name === rules[i].name);
+  if (editing && sameShape) return;
+  rules = fresh;
+  renderCats();
+}
+
+async function loadCounts() {
+  const { items } = await chrome.storage.local.get('items');
+  counts = new Map();
+  for (const it of Object.values(items || {})) counts.set(it.category, (counts.get(it.category) || 0) + 1);
+  for (const el of catList.querySelectorAll('.cat')) {
+    const r = rules.find((x) => x.id === el.dataset.id);
+    const n = r ? counts.get(r.name) || 0 : 0;
+    el.querySelector('.c-count').textContent = `${n} Eintr${n === 1 ? 'ag' : 'äge'}`;
+  }
+}
 
 // ------------------------------------------------------------------ Daten
 
@@ -223,7 +384,8 @@ $('link-overview').addEventListener('click', (e) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  if (changes.items) showStats();
+  if (changes.items) { showStats(); loadCounts(); }
+  if (changes.rules) onRulesChanged();
   if (changes.autoLog) showAutoLog();
 });
 
@@ -233,8 +395,18 @@ chrome.storage.onChanged.addListener((changes, area) => {
   try {
     await loadSettings();
     rules = await getRules();
-    renderRules();
+    await loadCounts();
+    renderCats();
+    if (location.hash === '#kategorien') $('sec-cats').scrollIntoView();
     showStats();
     showAutoLog();
   } catch (e) { showError(e); }
 })();
+
+// Ungespeicherte Stichwort-Änderungen beim Schließen der Seite noch abschicken.
+window.addEventListener('pagehide', () => {
+  if (!saveTimer2) return;
+  clearTimeout(saveTimer2);
+  saveTimer2 = null;
+  try { chrome.runtime.sendMessage({ cmd: 'saveRules', rules }); } catch { /* egal */ }
+});

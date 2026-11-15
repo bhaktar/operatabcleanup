@@ -57,11 +57,14 @@ export function isFileableYouTubeUrl(url) {
   return !!parseYouTube(url);
 }
 
-/** Kategorienamen für das Menü: aktive Regeln in Prioritätsreihenfolge, ohne Duplikate. */
+/**
+ * Kategorienamen für das Menü: alle Kategorien in Prioritätsreihenfolge, ohne Duplikate –
+ * auch solche ohne automatische Zuordnung (enabled = false bzw. ohne Stichwörter).
+ */
 export function menuCategories(rules) {
   const out = [];
   for (const r of rules || []) {
-    if (!r || r.enabled === false) continue;
+    if (!r) continue;
     const n = String(r.name || '').trim();
     if (n && !out.includes(n)) out.push(n);
   }
@@ -103,7 +106,7 @@ export function buildCategoryMenus(rules, { closeAfterFile = true } = {}) {
     const child = (o) => out.push({ parentId: v.parent, contexts: v.contexts, ...scope, ...o });
     child({ id: menuItemId(v.parent, null), title: 'Automatisch (Regeln)' });
     child({ id: `${v.parent}|sep1`, type: 'separator' });
-    for (const c of cats) child({ id: menuItemId(v.parent, c), title: c.replace(/&/g, '&&') });
+    for (const c of cats) child({ id: menuItemId(v.parent, c), title: c.replace(/\s*&\s*/g, ' und ') });
     if (v.parent === MENU.pageParent) {
       child({ id: `${v.parent}|sep2`, type: 'separator' });
       child({ id: MENU.closeToggle, type: 'checkbox', title: 'Tab danach schließen', checked: !!closeAfterFile });

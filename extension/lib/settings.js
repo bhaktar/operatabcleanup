@@ -7,6 +7,7 @@ export const DEFAULT_SETTINGS = {
   openOverviewAfterSave: true, // Übersicht nach dem Sammel-Ablegen öffnen/fokussieren
   afterOpen: 'remove',         // 'remove' | 'archive' | 'keep' – was nach dem Öffnen passiert
   fetchPreviews: true,         // Vorschaubilder für verworfene/geschlossene Tabs nachladen
+  closeAfterFile: true,        // Kontextmenü "Dieses Video ablegen in": Tab danach schließen
   theme: 'auto',               // 'auto' | 'dark' | 'light'
   pageSize: 200,
   autoArchive: { enabled: false, hours: 6 },

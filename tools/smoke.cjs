@@ -207,8 +207,8 @@ function startServer() {
     // Einstellungen
     const opt = await ctx.newPage();
     await opt.goto(`chrome-extension://${extId}/options.html`);
-    await opt.waitForSelector('.rule');
-    check((await opt.$$('.rule')).length >= 10, 'Optionen zeigen Regeln');
+    await opt.waitForSelector('.cat');
+    check((await opt.$$('.cat')).length >= 10, 'Optionen zeigen Kategorien');
     await opt.fill('#test-url', 'https://www.amazon.de/dp/1');
     check((await opt.textContent('#test-result')).includes('Shopping'), 'Regeltest in den Optionen');
     await opt.check('#autoEnabled');
@@ -246,6 +246,105 @@ function startServer() {
       return exportData(items, await getRules());
     });
     check(exp.format === 'tab-ablage' && exp.items.length === autoItems.length, 'JSON-Export erzeugt');
+
+    // ---------------------------------------------------------------- Kategorien & Kontextmenü
+    await sw.evaluate(async () => {
+      const r = await chrome.storage.local.get('settings');
+      r.settings.tabLimit = { enabled: false, max: 50 };
+      r.settings.autoArchive = { enabled: false, hours: 6 };
+      await chrome.storage.local.set({ settings: r.settings });
+    });
+    const rulesNow = async () => sw.evaluate(() => chrome.storage.local.get(['rules', 'rulesVersion']));
+    const itemsNow = async () => Object.values((await sw.evaluate(() => chrome.storage.local.get('items'))).items || {});
+    // Hook des Service Workers: dieselben Funktionen, die das Kontextmenü verwendet
+    const menuIds = async () => sw.evaluate(async () => {
+      await globalThis.tabAblage.menuState.chain;
+      return globalThis.tabAblage.menuState.lastBuilt;
+    });
+    const findVid = async (id) => (await itemsNow()).find((i) => i.yt && i.yt.videoId === id);
+    const rv = await rulesNow();
+    check(rv.rulesVersion === 2 && ['Spirituelles', 'Astrologie & Zukunftsforschung', 'Finanzen'].every((n) => rv.rules.some((r) => r.name === n)),
+      'Neuinstallation: Standardkategorien inkl. Spirituelles/Astrologie/Finanzen gespeichert');
+    let ids = await menuIds();
+    check(ids.includes('yt-link') && ids.includes('yt-page') && ids.includes('yt-link|cat|Spirituelles') && ids.includes('yt-page|close'),
+      `Kontextmenü mit Kategorien aufgebaut (${ids.length} Einträge)`);
+    check(ids.includes('save-link'), '„Link für später ablegen“ weiterhin vorhanden');
+
+    // Link in Kategorie senden
+    const n0Items = (await itemsNow()).length;
+    await sw.evaluate(() => globalThis.tabAblage.handleMenuClick({ menuItemId: 'yt-link|cat|Gaming', linkUrl: 'https://youtu.be/abcdefghijk?si=x' }, null));
+    let vid = await findVid('abcdefghijk');
+    check(vid && vid.category === 'Gaming' && vid.manualCategory === true && vid.thumbnail.includes('/abcdefghijk/'),
+      'Link in Kategorie „Gaming“ abgelegt (manuell, Thumbnail)');
+    check((await sw.evaluate(() => chrome.action.getBadgeText({}))) === '✓', 'Badge „✓“ als Rückmeldung');
+    await sw.evaluate(() => globalThis.tabAblage.handleMenuClick({ menuItemId: 'yt-link|cat|Musik', linkUrl: 'https://www.youtube.com/watch?v=abcdefghijk&t=10' }, null));
+    vid = await findVid('abcdefghijk');
+    check((await itemsNow()).length === n0Items + 1 && vid.category === 'Musik', 'gleiches Video erneut: Kategorie aktualisiert, kein Duplikat');
+    check((await sw.evaluate(() => chrome.action.getBadgeText({}))) === '↻', 'Badge „↻“ meldet „schon vorhanden“');
+
+    // Videoseite selbst ablegen (Seiten-Variante, Tab wird standardmäßig geschlossen)
+    const ytPage = await ctx.newPage();
+    await ytPage.goto('https://www.youtube.com/watch?v=zyxwvutsrqp', { waitUntil: 'domcontentloaded' }).catch(() => {});
+    const pageTab = await sw.evaluate(async () => (await chrome.tabs.query({ url: '*://www.youtube.com/watch*' }))[0]);
+    await sw.evaluate((t) => globalThis.tabAblage.handleMenuClick({ menuItemId: 'yt-page|cat|Technik', pageUrl: t.url }, t), pageTab);
+    vid = await findVid('zyxwvutsrqp');
+    check(vid && vid.category === 'Technik' && vid.manualCategory, 'Videoseite in „Technik“ abgelegt');
+    check(!(await sw.evaluate((id) => chrome.tabs.get(id).then(() => true, () => false), pageTab.id)), 'Tab danach geschlossen (Standard)');
+
+    // Kategorien in den Optionen verwalten
+    await opt.bringToFront();
+    await opt.reload();
+    await opt.waitForSelector('.cat');
+    await opt.click('#cat-add');
+    await opt.waitForTimeout(300);
+    const nameInput = opt.locator('.cat').first().locator('.c-name');
+    await nameInput.fill('Testliste');
+    await nameInput.press('Enter');
+    await opt.waitForTimeout(1200);
+    check((await rulesNow()).rules.some((r) => r.name === 'Testliste' && !r.keywords.length), 'Kategorie ohne Regeln hinzugefügt');
+    check((await menuIds()).includes('yt-link|cat|Testliste'), 'Kontextmenü enthält neue Kategorie sofort');
+    const editCat = (name, fn) => opt.evaluate(([n, src]) => {
+      const card = [...document.querySelectorAll('.cat')].find((x) => x.querySelector('.c-name').value === n);
+      // eslint-disable-next-line no-new-func
+      new Function('card', src)(card);
+    }, [name, fn]);
+    await editCat('Musik', `const el = card.querySelector('.c-name'); el.value = 'Lieder';
+      el.dispatchEvent(new Event('change', { bubbles: true }));`);
+    await opt.waitForTimeout(1200);
+    vid = await findVid('abcdefghijk');
+    check(vid.category === 'Lieder' && (await rulesNow()).rules.some((r) => r.name === 'Lieder'), 'Umbenennen ändert Kategorie und Einträge');
+    check((await menuIds()).includes('yt-link|cat|Lieder'), 'Kontextmenü nach Umbenennen aktualisiert');
+    await editCat('Lieder', `const c = card.querySelector('.c-color'); c.value = '#123456';
+      c.dispatchEvent(new Event('input', { bubbles: true })); c.dispatchEvent(new Event('change', { bubbles: true }));`);
+    await opt.waitForTimeout(1200);
+    await ov.bringToFront();
+    await ov.waitForTimeout(600);
+    const badgeStyle = await ov.evaluate(() => [...document.querySelectorAll('.badge')].find((b) => b.textContent === 'Lieder')?.getAttribute('style') || '');
+    check(badgeStyle.includes('#123456'), 'Kategoriefarbe erscheint in der Übersicht');
+    await opt.bringToFront();
+    await editCat('Lieder', `card.querySelector('.c-del').click();`);
+    await opt.waitForSelector('#del-dialog[open]');
+    check((await opt.$eval('#del-target', (s) => s.value)) === 'Sonstiges', 'Löschdialog schlägt „Sonstiges“ vor');
+    await opt.click('#del-ok');
+    await opt.waitForTimeout(1200);
+    vid = await findVid('abcdefghijk');
+    check(vid.category === 'Sonstiges' && !(await rulesNow()).rules.some((r) => r.name === 'Lieder'), 'Löschen verschiebt Einträge nach „Sonstiges“');
+
+    // Vorschläge
+    check(!(await rulesNow()).rules.some((r) => r.name === 'Krypto'), 'Vorschlag „Krypto“ standardmäßig inaktiv');
+    await opt.click('#sug-box summary');
+    await opt.click('[data-sug="sug-krypto"] [data-sug-on]');
+    await opt.waitForTimeout(1200);
+    const kr = (await rulesNow()).rules.find((r) => r.name === 'Krypto');
+    check(kr && kr.keywords.includes('bitcoin'), 'Vorschlag aktiviert (mit Stichwörtern)');
+    check((await menuIds()).includes('yt-link|cat|Krypto'), 'aktivierter Vorschlag im Kontextmenü');
+    check(await opt.$eval('[data-sug="sug-krypto"] button', (b) => b.disabled && b.textContent === 'Aktiv'), 'Vorschlag zeigt „Aktiv“');
+    await opt.click('[data-sug="sug-ki"] [data-sug-bare]');
+    await opt.waitForTimeout(1200);
+    const ki = (await rulesNow()).rules.find((r) => r.name === 'KI & Tools');
+    check(ki && ki.keywords.length === 0, '„Nur Kategorie“ aktiviert ohne Stichwörter');
+    await opt.evaluate(() => window.scrollTo(0, 0));
+    await opt.screenshot({ path: path.join(SHOTS, 'options-kategorien.png') });
 
     const relevant = errors.filter((e) => !/net::ERR|Failed to load resource|ERR_TUNNEL|ERR_CERT|favicon/i.test(e));
     if (relevant.length) console.log('Fehlermeldungen:\n  ' + relevant.join('\n  '));

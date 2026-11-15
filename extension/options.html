@@ -18,10 +18,59 @@
   </header>
 
   <main>
+    <section class="card" id="sec-cats">
+      <h2>Kategorien</h2>
+      <p class="muted">
+        Deine Kategorien erscheinen in der Übersicht (Filter, Kategorie ändern) und im Rechtsklick-Menü
+        „An Tab-Ablage senden“ bzw. „Dieses Video ablegen in“. Eine Kategorie braucht keine Regeln –
+        Stichwörter und Domains für die automatische Zuordnung sind optional. Die Reihenfolge ist die Priorität:
+        Bei mehreren passenden Kategorien gewinnt die obere. Änderungen gelten sofort.
+      </p>
+      <div class="buttons">
+        <button id="cat-add" class="btn primary" type="button">+ Kategorie hinzufügen</button>
+        <button id="cats-recat" class="btn" type="button" title="Regeln erneut auf alle nicht manuell zugeordneten Einträge anwenden">Neu kategorisieren</button>
+        <button id="cats-reset" class="btn danger" type="button">Standardkategorien wiederherstellen</button>
+        <span id="cats-state" class="muted"></span>
+      </div>
+      <div id="cat-list" class="cat-list"></div>
+
+      <details class="suggest" id="sug-box">
+        <summary>Weitere Kategorien (Vorschläge)</summary>
+        <p class="muted small">
+          Diese Kategorien sind nicht aktiv, bis du sie aktivierst. „Aktivieren“ übernimmt sie mit Beispiel-Stichwörtern
+          (oben in der Liste, also mit hoher Priorität), „Nur Kategorie“ ohne Stichwörter – dann ordnest du selbst zu.
+          Danach sind sie normale Kategorien, die du umbenennen, bearbeiten oder löschen kannst.
+        </p>
+        <div id="sug-list" class="sug-list"></div>
+      </details>
+
+      <details class="help">
+        <summary>So funktioniert die automatische Zuordnung</summary>
+        <ul class="muted small">
+          <li>Zuerst zählen Domains (stärkstes Signal), dann Stichwörter in Titel und Kanal, dann in der Seitenbeschreibung.</li>
+          <li>Domains passen auch auf Subdomains (<code>amazon.de</code> → <code>smile.amazon.de</code>), mit Pfad nur auf diesen Pfad (<code>google.com/maps</code>).</li>
+          <li>Stichwörter: Groß-/Kleinschreibung egal, Suche am Wortanfang (<code>aktie</code> findet „Aktien“). Stichwörter mit höchstens 3 Zeichen nur als ganzes Wort (<code>ki</code> findet nicht „Kirche“, <code>etf</code> nicht „Netflix“).</li>
+          <li>Eine Auffang-Kategorie bekommt alles, was sonst nirgends passt (je Bereich YouTube/Web).</li>
+          <li>Manuell gesetzte Kategorien (Übersicht, Rechtsklick-Menü, Import) werden nie automatisch überschrieben.</li>
+        </ul>
+      </details>
+
+      <div class="tester">
+        <h3>Zuordnung testen</h3>
+        <div class="row">
+          <input type="text" id="test-url" placeholder="URL, z. B. https://www.youtube.com/watch?v=dQw4w9WgXcQ">
+          <input type="text" id="test-title" placeholder="Titel / Kanal">
+          <strong id="test-result" class="result"></strong>
+        </div>
+      </div>
+    </section>
+
+
     <section class="card">
       <h2>Allgemein</h2>
       <label class="check"><input type="checkbox" id="keepActiveTab"> Aktiven Tab beim „Alle Tabs ablegen“ offen lassen</label>
       <label class="check"><input type="checkbox" id="openOverviewAfterSave"> Übersicht nach dem Ablegen mehrerer Tabs öffnen</label>
+      <label class="check"><input type="checkbox" id="closeAfterFile"> Rechtsklick „Dieses Video ablegen in“: Tab danach schließen</label>
       <label class="check"><input type="checkbox" id="fetchPreviews"> Vorschaubilder für verworfene/geschlossene Tabs nachträglich von der Seite laden</label>
       <div class="row">
         <label for="afterOpen">Nach dem Öffnen eines Eintrags</label>
@@ -71,32 +120,6 @@
     </section>
 
     <section class="card">
-      <h2>Kategorien-Regeln</h2>
-      <p class="muted">
-        Regeln werden von oben nach unten geprüft – die erste passende gewinnt. Domains passen auch auf Subdomains
-        (<code>amazon.de</code> → <code>smile.amazon.de</code>), mit Pfad nur auf diesen Pfad (<code>google.com/maps</code>).
-        Stichwörter werden in Titel und Kanal am Wortanfang gesucht (<code>aktie</code> findet „Aktien“), Stichwörter
-        mit höchstens 3 Zeichen nur als ganzes Wort. Eine Regel ohne Domains und Stichwörter ist eine Auffang-Regel
-        für ihren Bereich. Manuell gesetzte Kategorien werden nie überschrieben.
-      </p>
-      <div id="rules" class="rules"></div>
-      <div class="buttons">
-        <button id="rule-add" class="btn" type="button">Regel hinzufügen</button>
-        <button id="rules-save" class="btn primary" type="button">Regeln speichern &amp; neu kategorisieren</button>
-        <button id="rules-reset" class="btn danger" type="button">Standardregeln wiederherstellen</button>
-        <span id="rules-state" class="muted"></span>
-      </div>
-      <div class="tester">
-        <h3>Regel testen</h3>
-        <div class="row">
-          <input type="text" id="test-url" placeholder="URL, z. B. https://www.youtube.com/watch?v=dQw4w9WgXcQ">
-          <input type="text" id="test-title" placeholder="Titel / Kanal">
-          <strong id="test-result" class="result"></strong>
-        </div>
-      </div>
-    </section>
-
-    <section class="card">
       <h2>Daten</h2>
       <p class="muted" id="data-stats"></p>
       <div class="buttons">
@@ -114,28 +137,53 @@
     </section>
   </main>
 
-  <template id="rule-tpl">
-    <div class="rule">
-      <div class="rule-head">
+  <template id="cat-tpl">
+    <div class="cat">
+      <div class="cat-head">
         <span class="prio"></span>
-        <input type="text" class="r-name" placeholder="Kategoriename" maxlength="60" aria-label="Kategoriename">
-        <select class="r-scope" aria-label="Gilt für">
-          <option value="youtube">nur YouTube</option>
-          <option value="web">nur Web</option>
-          <option value="alle">alle</option>
-        </select>
-        <label class="check inline"><input type="checkbox" class="r-enabled"> aktiv</label>
+        <input type="color" class="c-color" title="Farbe (für das Abzeichen in der Übersicht)" aria-label="Farbe">
+        <input type="text" class="c-name" maxlength="60" aria-label="Kategoriename">
+        <span class="c-count muted"></span>
         <span class="spacer"></span>
-        <button class="btn small r-up" type="button" title="Nach oben (höhere Priorität)">↑</button>
-        <button class="btn small r-down" type="button" title="Nach unten">↓</button>
-        <button class="btn small danger r-del" type="button" title="Regel löschen">Löschen</button>
+        <button class="btn small c-up" type="button" title="Nach oben (höhere Priorität)" aria-label="Nach oben">↑</button>
+        <button class="btn small c-down" type="button" title="Nach unten" aria-label="Nach unten">↓</button>
+        <button class="btn small danger c-del" type="button">Löschen</button>
       </div>
-      <div class="rule-body">
-        <label>Domains<textarea class="r-domains" rows="3" placeholder="z. B. amazon.de, ebay.de"></textarea></label>
-        <label>Stichwörter<textarea class="r-keywords" rows="3" placeholder="z. B. tutorial, anleitung"></textarea></label>
-      </div>
+      <details class="c-rules">
+        <summary>Automatisch zuordnen, wenn … <span class="c-auto muted"></span></summary>
+        <div class="row">
+          <label>Gilt für
+            <select class="c-scope">
+              <option value="alle">YouTube und Web</option>
+              <option value="youtube">nur YouTube</option>
+              <option value="web">nur Web</option>
+            </select>
+          </label>
+          <label class="check inline"><input type="checkbox" class="c-enabled"> automatische Zuordnung aktiv</label>
+          <label class="check inline" title="Bekommt alles, was in keine andere Kategorie passt"><input type="checkbox" class="c-fallback"> Auffang-Kategorie</label>
+        </div>
+        <div class="rule-body">
+          <label>… die Domain passt<textarea class="c-domains" rows="3" placeholder="z. B. amazon.de, ebay.de"></textarea></label>
+          <label>… eines dieser Stichwörter vorkommt<textarea class="c-keywords" rows="3" placeholder="z. B. tutorial, anleitung"></textarea></label>
+        </div>
+      </details>
     </div>
   </template>
+
+  <dialog id="del-dialog">
+    <form method="dialog">
+      <h3 id="del-title"></h3>
+      <p id="del-text" class="muted"></p>
+      <label class="row col">Einträge verschieben nach
+        <select id="del-target"></select>
+      </label>
+      <div class="buttons">
+        <button class="btn" value="cancel" type="submit">Abbrechen</button>
+        <button class="btn danger" value="ok" type="submit" id="del-ok">Kategorie löschen</button>
+      </div>
+    </form>
+  </dialog>
+
 
   <script type="module" src="options.js"></script>
 </body>

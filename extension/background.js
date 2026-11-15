@@ -5,7 +5,12 @@ import { buildItem, mergeResave, openUrl, mergeImport } from './lib/items.js';
 import { categorize } from './lib/categorize.js';
 import { isSaveableUrl, isYouTubeUrl, getDomain, domainInList, sanitizeImageUrl, cleanTitle } from './lib/url.js';
 import { extractMetaFromHtml } from './lib/meta.js';
-import { getSettings, getRules } from './lib/settings.js';
+import { getSettings, getRules, saveSettings } from './lib/settings.js';
+import { normalizeRules, DEFAULT_RULES } from './lib/categorize.js';
+import {
+  migrateRules, applyRenames, renameCategoryInRules, deleteCategoryFromRules, reassignItems, ensureCategories,
+} from './lib/categories.js';
+import { buildCategoryMenus, parseMenuItemId, MENU } from './lib/menus.js';
 
 const OWN_PREFIX = chrome.runtime.getURL('');
 const OVERVIEW_URL = chrome.runtime.getURL('overview.html');
@@ -470,6 +475,9 @@ async function enrichPending() {
 // ------------------------------------------------------------------ Bearbeitung durch Übersicht/Optionen
 
 async function updateItems(ids, patch) {
+  if (typeof patch.category === 'string' && patch.category.trim()) {
+    await addMissingCategories([patch.category.trim().slice(0, 60)]); // neue Kategorie aus der Übersicht
+  }
   await ensureLoaded();
   const rules = await getRules();
   const now = Date.now();
@@ -555,6 +563,7 @@ async function openItems(ids, { active = false, windowId = null, index = null } 
 }
 
 async function importData(rawList) {
+  await addMissingCategories((rawList || []).map((r) => (typeof r.category === 'string' ? r.category.trim().slice(0, 60) : '')));
   await ensureLoaded();
   const rules = await getRules();
   const res = mergeImport(store.items, rawList, rules);
@@ -645,29 +654,190 @@ function ensureAlarm() {
   });
 }
 
+// ------------------------------------------------------------------ Kategorien (Regeln)
+
+let rulesChain = Promise.resolve();
+/** Serialisiert alle Änderungen an `rules` (und zugehörige Änderungen an `items`). */
+function withRules(fn) {
+  const run = rulesChain.then(async () => {
+    await ensureMigrated();
+    return fn(await getRules());
+  });
+  rulesChain = run.catch(() => {});
+  return run;
+}
+
+async function writeRules(rules) {
+  const norm = normalizeRules(rules);
+  await chrome.storage.local.set({ rules: norm });
+  return norm;
+}
+
+let migrated = null;
+/** Einmalige Migration der Regeln (neue Standardkategorien, "Finanzen/Börse" -> "Finanzen"). */
+function ensureMigrated() {
+  if (!migrated) {
+    migrated = (async () => {
+      const r = await chrome.storage.local.get(['rules', 'rulesVersion']);
+      const res = migrateRules(r.rules, r.rulesVersion);
+      if (!res.changed && r.rulesVersion === res.version) return;
+      await chrome.storage.local.set({ rules: res.rules, rulesVersion: res.version });
+      if (Object.keys(res.renames).length) {
+        await ensureLoaded();
+        if (applyRenames(store.items, res.renames)) { store.dirty = true; await flush(); }
+      }
+    })().catch(() => { migrated = null; });
+  }
+  return migrated;
+}
+
+/** Kategorien, die nur an Einträgen hängen (Übersicht, Import), als leere Kategorien ergänzen. */
+async function addMissingCategories(names) {
+  const wanted = [...new Set((names || []).filter(Boolean))];
+  if (!wanted.length) return;
+  await withRules(async (rules) => {
+    const res = ensureCategories(rules, wanted);
+    if (res.added) await writeRules(res.rules);
+  });
+}
+
+async function saveRulesAndRecategorize(rules) {
+  await withRules(async () => writeRules(rules));
+  return recategorizeAll();
+}
+
+async function renameCategory(id, newName) {
+  return withRules(async (rules) => {
+    const res = renameCategoryInRules(rules, id, newName);
+    await writeRules(res.rules);
+    await ensureLoaded();
+    const n = applyRenames(store.items, { [res.oldName]: res.newName });
+    if (n) { store.dirty = true; await flush(); }
+    return { renamed: n, oldName: res.oldName, newName: res.newName };
+  });
+}
+
+async function deleteCategory(id, target) {
+  return withRules(async (rules) => {
+    const res = deleteCategoryFromRules(rules, id);
+    let next = res.rules;
+    if (target) next = ensureCategories(next, [target]).rules;
+    next = await writeRules(next);
+    await ensureLoaded();
+    const n = reassignItems(store.items, res.name, target || null, next);
+    if (n) { store.dirty = true; await flush(); }
+    return { moved: n, name: res.name };
+  });
+}
+
 // ------------------------------------------------------------------ Kontextmenü
 
-function setupMenus() {
-  chrome.contextMenus.removeAll(() => {
-    const add = (o) => chrome.contextMenus.create(o, () => void chrome.runtime.lastError);
-    add({ id: 'save-tab', title: 'Tab ablegen', contexts: ['page', 'frame', 'selection', 'image', 'video', 'audio'] });
-    add({ id: 'save-right', title: 'Alle Tabs rechts davon ablegen', contexts: ['page', 'frame', 'selection'] });
-    add({ id: 'save-link', title: 'Link für später ablegen', contexts: ['link'] });
-    add({ id: 'action-overview', title: 'Übersicht öffnen', contexts: ['action'] });
-    add({ id: 'action-save-all', title: 'Alle Tabs ablegen & schließen', contexts: ['action'] });
+const menuState = { chain: Promise.resolve(), lastBuilt: [] };
+
+function createMenu(props) {
+  return new Promise((resolve) => {
+    chrome.contextMenus.create(props, () => { void chrome.runtime.lastError; resolve(); });
+  });
+}
+
+/** Baut alle Menüs neu auf (serialisiert: removeAll, dann create – keine doppelten IDs). */
+function rebuildMenus() {
+  menuState.chain = menuState.chain.then(async () => {
+    await ensureMigrated();
+    const [rules, settings] = await Promise.all([getRules(), getSettings()]);
+    await new Promise((r) => chrome.contextMenus.removeAll(() => { void chrome.runtime.lastError; r(); }));
+    const all = [
+      { id: 'save-tab', title: 'Tab ablegen', contexts: ['page', 'frame', 'selection', 'image', 'video', 'audio'] },
+      { id: 'save-right', title: 'Alle Tabs rechts davon ablegen', contexts: ['page', 'frame', 'selection'] },
+      { id: 'save-link', title: 'Link für später ablegen', contexts: ['link'] },
+      ...buildCategoryMenus(rules, { closeAfterFile: settings.closeAfterFile }),
+      { id: 'action-overview', title: 'Übersicht öffnen', contexts: ['action'] },
+      { id: 'action-save-all', title: 'Alle Tabs ablegen & schließen', contexts: ['action'] },
+    ];
+    for (const m of all) await createMenu(m);
+    menuState.lastBuilt = all.map((m) => m.id);
+  }).catch(() => {});
+  return menuState.chain;
+}
+
+let badgeTimer = null;
+/** Kurze Rückmeldung am Symbol (ohne zusätzliche Berechtigung wie "notifications"). */
+function flashBadge(text, color, title) {
+  clearTimeout(badgeTimer);
+  chrome.action.setBadgeBackgroundColor({ color }).catch(() => {});
+  chrome.action.setBadgeText({ text }).catch(() => {});
+  if (title) chrome.action.setTitle({ title: `Tab-Ablage – ${title}` }).catch(() => {});
+  badgeTimer = setTimeout(() => {
+    chrome.action.setBadgeText({ text: '' }).catch(() => {});
+    chrome.action.setTitle({ title: 'Tab-Ablage' }).catch(() => {});
+  }, title ? 4000 : 2000);
+}
+
+/**
+ * Legt ein YouTube-Video in einer bestimmten Kategorie ab (manuelle Zuordnung) bzw. nach Regeln
+ * (category = null). Vorhandene Einträge (gleiche Video-ID) werden aktualisiert statt verdoppelt.
+ */
+async function fileYouTube(url, category, { source = 'link', title = '', tab = null, closeTab = false } = {}) {
+  const rec = buildItem({ url, title, source });
+  if (!rec || rec.type !== 'youtube') {
+    flashBadge('!', '#ef4444', 'Kein YouTube-Video erkannt');
+    return { ok: false };
+  }
+  if (tab && closeTab) {
+    try { applyProbe(rec, await probeTab(tab.id)); } catch { /* Position unbekannt */ }
+  }
+  if (category) await addMissingCategories([category]);
+  await ensureLoaded();
+  const rules = await getRules();
+  const ex = store.items[rec.id];
+  const target = ex ? mergeResave(ex, rec) : rec;
+  if (category) {
+    target.category = category;
+    target.manualCategory = true;
+  } else if (!target.manualCategory) {
+    target.category = categorize(target, rules);
+  }
+  if (!ex) store.items[rec.id] = rec;
+  store.dirty = true;
+  await flush(); // erst speichern, dann schließen
+  if (tab && closeTab) {
+    if (await wouldCloseEverything([tab])) await ensureOverview({ windowId: tab.windowId, active: false });
+    await closeTabs([tab.id]);
+  }
+  flashBadge(ex ? '↻' : '✓', ex ? '#f59e0b' : '#16a34a',
+    ex ? `Schon abgelegt – Kategorie jetzt „${target.category}“` : `Abgelegt in „${target.category}“`);
+  enrichPending();
+  return { ok: true, id: target.id, existed: !!ex, category: target.category };
+}
+
+async function handleMenuClick(info, tab) {
+  const id = info.menuItemId;
+  if (id === 'save-tab' && tab) return runSave('tab', { tabId: tab.id });
+  if (id === 'save-right' && tab) return runSave('right', { tabId: tab.id, windowId: tab.windowId });
+  if (id === 'save-link' && info.linkUrl) return saveLink(info.linkUrl, info.selectionText || '');
+  if (id === 'action-overview') return ensureOverview({ windowId: tab?.windowId, active: true });
+  if (id === 'action-save-all') return runSave('all', { windowId: tab?.windowId });
+  if (id === MENU.closeToggle) return saveSettings({ closeAfterFile: !!info.checked });
+  const parsed = parseMenuItemId(id);
+  if (!parsed) return null;
+  if (parsed.variant === 'link') {
+    // contextMenus liefert nur die Link-URL; den Titel holt die oEmbed-Anreicherung.
+    return fileYouTube(info.linkUrl, parsed.category, { source: 'link' });
+  }
+  const pageUrl = (tab && tab.url) || info.pageUrl;
+  const settings = await getSettings();
+  return fileYouTube(pageUrl, parsed.category, {
+    source: 'tab', title: tab ? tab.title : '', tab, closeTab: !!(tab && settings.closeAfterFile),
   });
 }
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
-  const run = async () => {
-    if (info.menuItemId === 'save-tab' && tab) await runSave('tab', { tabId: tab.id });
-    else if (info.menuItemId === 'save-right' && tab) await runSave('right', { tabId: tab.id, windowId: tab.windowId });
-    else if (info.menuItemId === 'save-link' && info.linkUrl) await saveLink(info.linkUrl, info.selectionText || '');
-    else if (info.menuItemId === 'action-overview') await ensureOverview({ windowId: tab?.windowId, active: true });
-    else if (info.menuItemId === 'action-save-all') await runSave('all', { windowId: tab?.windowId });
-  };
-  run().catch(() => { /* Fehler wird über den Job gemeldet */ });
+  handleMenuClick(info, tab).catch(() => flashBadge('!', '#ef4444', 'Ablegen fehlgeschlagen'));
 });
+
+// Für die Fehlersuche in der Service-Worker-Konsole (und den Rauchtest): ruft dieselben Funktionen
+// auf, die auch das Kontextmenü verwendet – kein abweichendes Verhalten.
+globalThis.tabAblage = { handleMenuClick, rebuildMenus, menuState };
 
 // ------------------------------------------------------------------ Nachrichten
 
@@ -687,6 +857,10 @@ const handlers = {
   async retryEnrich() { await retryEnrich(); return {}; },
   async openOverview(m) { await ensureOverview({ windowId: m.windowId, active: true }); return {}; },
   async settingsChanged() { ensureAlarm(); autoCheck().catch(() => {}); return {}; },
+  async saveRules(m) { return { changed: await saveRulesAndRecategorize(m.rules) }; },
+  async resetRules() { return { changed: await saveRulesAndRecategorize(DEFAULT_RULES) }; },
+  async renameCategory(m) { return renameCategory(m.id, m.name); },
+  async deleteCategory(m) { return deleteCategory(m.id, m.target || null); },
 };
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -702,11 +876,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // ------------------------------------------------------------------ Lebenszyklus
 
 chrome.runtime.onInstalled.addListener(() => {
-  setupMenus();
+  ensureMigrated().then(rebuildMenus);
   ensureAlarm();
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  ensureMigrated().then(rebuildMenus);
   ensureAlarm();
   enrichPending();
 });
@@ -719,6 +894,12 @@ chrome.alarms.onAlarm.addListener((a) => {
 chrome.tabs.onActivated.addListener(({ tabId }) => noteActive(tabId));
 
 chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local') {
+    // Kategorien geändert (Optionen, Übersicht, Import) -> Kontextmenü sofort neu aufbauen
+    const closeChanged = changes.settings &&
+      (changes.settings.oldValue || {}).closeAfterFile !== (changes.settings.newValue || {}).closeAfterFile;
+    if (changes.rules || closeChanged) rebuildMenus();
+  }
   // Speicher wurde von außen geleert (z. B. über die Entwicklertools): Cache verwerfen.
   if (area === 'local' && changes.items && changes.items.newValue === undefined && store.items) {
     store.items = {};

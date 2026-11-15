@@ -130,8 +130,18 @@ function fallbackHtml(it) {
     `<span class="dom">${esc(dom)}</span></div>`;
 }
 
+function catColor(name) {
+  const r = state.rules.find((x) => x.name === name);
+  return r && /^#[0-9a-f]{6}$/i.test(r.color) ? r.color : '';
+}
+
+function colorStyle(name) {
+  const c = catColor(name);
+  return c ? ` style="--c:${c}"` : '';
+}
+
 function cardSig(it) {
-  return `${it.updatedAt}|${it.savedAt}|${it.status}`;
+  return `${it.updatedAt}|${it.savedAt}|${it.status}|${catColor(it.category)}`;
 }
 
 function buildCard(it) {
@@ -160,7 +170,7 @@ function buildCard(it) {
       `<div class="meta"><img class="fav" src="${esc(faviconFor(it, 32))}" data-alt="${esc(it.favIconUrl || '')}" alt="" loading="lazy">${src}` +
         `<span class="date" title="Abgelegt am ${esc(formatDateTime(it.savedAt))}">${esc(formatDate(it.savedAt))}</span></div>` +
       `<div class="row">` +
-        `<button class="badge${it.manualCategory ? ' manual' : ''}" type="button" data-act="cat" title="Kategorie ändern${it.manualCategory ? ' (manuell gesetzt)' : ''}">${esc(it.category || 'Ohne Kategorie')}</button>` +
+        `<button class="badge${it.manualCategory ? ' manual' : ''}"${colorStyle(it.category)} type="button" data-act="cat" title="Kategorie ändern${it.manualCategory ? ' (manuell gesetzt)' : ''}">${esc(it.category || 'Ohne Kategorie')}</button>` +
         `<span class="acts">` +
           `<button class="icon-btn" type="button" data-act="open" title="Öffnen (Strg+Klick: im Hintergrund)">${icon('open')}</button>` +
           (archived
@@ -220,7 +230,7 @@ function render() {
   cats.sort((a, b) => idx(a) - idx(b) || a.localeCompare(b, 'de'));
   const catHtml = [`<button class="side-item${ui.category ? '' : ' on'}" type="button" data-cat=""><span>Alle Kategorien</span><b>${baseCount}</b></button>`];
   for (const c of cats) {
-    catHtml.push(`<button class="side-item${ui.category === c ? ' on' : ''}" type="button" data-cat="${esc(c)}" title="${esc(c)}"><span>${esc(c)}</span><b>${catCounts.get(c) || 0}</b></button>`);
+    catHtml.push(`<button class="side-item${ui.category === c ? ' on' : ''}" type="button" data-cat="${esc(c)}" title="${esc(c)}"><span><i class="dot"${colorStyle(c)}></i>${esc(c)}</span><b>${catCounts.get(c) || 0}</b></button>`);
   }
   $('cats').innerHTML = catHtml.join('');
 
@@ -347,7 +357,7 @@ function openCatmenu(ids, anchor) {
   catmenuIds = ids;
   const current = ids.length === 1 ? state.byId.get(ids[0])?.category : null;
   $('catmenu-list').innerHTML = allCategoryNames()
-    .map((n) => `<button type="button" data-catpick="${esc(n)}" class="${n === current ? 'on' : ''}">${esc(n)}</button>`).join('');
+    .map((n) => `<button type="button" data-catpick="${esc(n)}" class="${n === current ? 'on' : ''}"><i class="dot"${colorStyle(n)}></i>${esc(n)}</button>`).join('');
   const m = $('catmenu');
   m.hidden = false;
   const r = anchor.getBoundingClientRect();
@@ -387,6 +397,12 @@ $('catmenu-form').addEventListener('submit', (e) => {
   if (v) applyCategory({ category: v });
 });
 $('catmenu-auto').addEventListener('click', () => applyCategory({ resetCategory: true }));
+function manageCategories() {
+  closeCatmenu();
+  chrome.tabs.create({ url: chrome.runtime.getURL('options.html#kategorien') });
+}
+$('catmenu-manage').addEventListener('click', manageCategories);
+$('cats-manage').addEventListener('click', manageCategories);
 document.addEventListener('mousedown', (e) => {
   if (!$('catmenu').hidden && !e.target.closest('#catmenu') && !e.target.closest('[data-act="cat"]') && !e.target.closest('#bulk-category')) closeCatmenu();
 });
@@ -593,7 +609,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
       scheduleRender();
     });
   }
-  if (changes.rules) getRules().then((r) => { state.rules = r; scheduleRender(); });
+  if (changes.rules) getRules().then((r) => { state.rules = r; scheduleRender(0); });
 });
 
 chrome.runtime.onMessage.addListener((msg) => {
